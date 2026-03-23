@@ -1,7 +1,6 @@
 # PdfGenerationModule
 
-> A reusable, modular Unity submodule for native Android PDF generation.  
-> Zero third-party dependencies · No license risk · Enterprise/MNC ready · Apache 2.0
+> A reusable, modular Unity submodule for native Android PDF generation.
 
 ---
 
