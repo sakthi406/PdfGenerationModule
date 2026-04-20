@@ -14,6 +14,7 @@ namespace PdfGenerationModule.Core
         public string Title;
         public string SubTitle;
         public string FooterText;
+        public string LogoBase64;
         public DateTime GeneratedAt;
         public List<PdfSection> Sections;
 
@@ -50,6 +51,8 @@ namespace PdfGenerationModule.Core
         public string Label;
         public string Value;
         public bool IsChecked;
-        public bool HasCheckbox;   // if false, render as plain text row
+        public bool HasCheckbox; // if false, render as plain text row
+        public bool IsHeaderRow;
+        public bool IsNoteRow;
     }
 }
