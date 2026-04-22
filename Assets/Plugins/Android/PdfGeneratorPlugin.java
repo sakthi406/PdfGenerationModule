@@ -169,6 +169,7 @@ public class PdfGeneratorPlugin
             JSONObject doc    = new JSONObject(jsonData);
             String title      = doc.optString("Title",     "Report");
             String subTitle   = doc.optString("SubTitle",  "");
+            String refDocumentId = doc.optString("RefDocumentId",  "");
             String footerText = doc.optString("FooterText","");
             String logoBase64 = doc.optString("LogoBase64","");
             JSONArray sections = doc.optJSONArray("Sections");
@@ -220,23 +221,27 @@ public class PdfGeneratorPlugin
             int colLabelW = (int)(contentW * COL_LABEL_RATIO);
             int colValueW = contentW - colLabelW;
 
-            int y = margin + titleFontSize;
-
-            // ── Logo top-right ────────────────────────────────────────
+            // ── Logo top-right — drawn first so title renders on top if overlap ──
+            int logoAreaH = 0;
             if (logoBitmap != null)
             {
                 int[] logoDims = scaledDims(
                     logoBitmap.getWidth(), logoBitmap.getHeight(),
                     LOGO_MAX_W, LOGO_MAX_H);
-
                 int logoX = pageWidth - margin - logoDims[0];
                 int logoY = margin;
                 Rect destRect = new Rect(logoX, logoY,
                     logoX + logoDims[0], logoY + logoDims[1]);
                 canvas.drawBitmap(logoBitmap, null, destRect, null);
+                logoAreaH = logoDims[1];
+                Log.d(TAG, "Logo drawn at x=" + logoX + " y=" + logoY
+                    + " w=" + logoDims[0] + " h=" + logoDims[1]);
             }
 
-            // ── Title ─────────────────────────────────────────────────
+            // ── Start y below logo height if logo is taller than title ────
+            int y = margin + Math.max(titleFontSize, logoAreaH) + 4;
+
+            // ── Title ─────────────────────────────────────────────────────
             canvas.drawText(title, margin, y, titlePaint);
             y += (int)(rowSpacing * 1.2f);
 
@@ -246,7 +251,13 @@ public class PdfGeneratorPlugin
                 canvas.drawText(subTitle, margin, y, subTitlePaint);
                 y += rowSpacing;
             }
-
+            // ── Document ID ───────────────────────────────────────────
+            if (!refDocumentId.isEmpty())
+            {
+                Paint refDocPaint = makePaint(COLOR_SUBTITLE, bodyFontSize, Typeface.NORMAL);
+                canvas.drawText("Document ID: " + refDocumentId, margin, y, refDocPaint);
+                y += rowSpacing;
+            }
             // ── Divider under header ───────────────────────────────────
             canvas.drawLine(margin, y, pageWidth - margin, y, dividerPaint);
             y += (int)(rowSpacing * 0.8f);
@@ -296,7 +307,24 @@ public class PdfGeneratorPlugin
                             boolean isNote   = row.optBoolean("IsNoteRow",   false);
                             boolean isChecked= row.optBoolean("IsChecked",   false);
 
-                            int rowH = rowSpacing + 6; // row height with padding
+                            int colLabelWForCalc = colLabelW - 8;
+                            float labelWidth = bodyPaint.measureText(label);
+                            int wrappedLines = labelWidth <= colLabelWForCalc ? 0
+                                : (int) Math.ceil(labelWidth / colLabelWForCalc);
+
+                            // Peek ahead: check if NEXT row is a note row — if yes, add its height inside this row
+                            boolean nextRowIsNote = false;
+                            String noteText = "";
+                            if (!isHeader && !isNote && r + 1 < rows.length())
+                            {
+                                JSONObject nextRow = rows.getJSONObject(r + 1);
+                                nextRowIsNote = nextRow.optBoolean("IsNoteRow", false);
+                                if (nextRowIsNote)
+                                    noteText = nextRow.optString("Label", "");
+                            }
+                            int noteLineH = nextRowIsNote ? (int)(bodyFontSize + 6) : 0;
+                            int rowH = isNote ? 0
+                                 : rowSpacing + 6 + (wrappedLines * (int)(bodyFontSize + 4)) + noteLineH;
 
                             if (isHeader)
                             {
@@ -321,8 +349,7 @@ public class PdfGeneratorPlugin
                             }
                             else if (isNote)
                             {
-                                // ── Note row — no background, italic ──
-                                canvas.drawText(label, margin + 16, y, notePaint);
+                                continue;
                             }
                             else
                             {
@@ -349,14 +376,28 @@ public class PdfGeneratorPlugin
                                     y, valuePaint);
 
                                 // vertical column divider
-                                canvas.drawLine(
-                                    margin + colLabelW, y - bodyFontSize,
-                                    margin + colLabelW, y - bodyFontSize + rowH,
-                                    borderPaint);
+                                    canvas.drawLine(
+                                        margin + colLabelW, y - bodyFontSize,
+                                        margin + colLabelW, y - bodyFontSize + rowH,
+                                        borderPaint);
 
-                                altRow = !altRow;
+                                    // Draw note inside this row if next row is a note
+                                    if (nextRowIsNote && !noteText.isEmpty())
+                                    {
+                                        // Strip the "    ↳ Note: " prefix — just keep what comes after "Note: "
+                                        String displayNote = noteText.contains("Note: ")
+                                            ? noteText.substring(noteText.indexOf("Note: "))
+                                            : noteText;
+
+                                        Paint inlineNotePaint = makePaint(Color.parseColor("#1A3C5E"),
+                                            bodyFontSize - 1, Typeface.ITALIC);
+                                        float noteY = y + (rowSpacing / 2f) + 2;
+                                        canvas.drawText(displayNote, margin + 8, noteY, inlineNotePaint);
+                                    }
+
+                                    altRow = !altRow;
                             }
-
+                            
                             y += rowH;
                         }
                     }
@@ -392,26 +433,46 @@ public class PdfGeneratorPlugin
         canvas.drawText(text, margin, fy, paint);
     }
 
-    /// Draws text clipped to a column width — truncates with "…" if too long
-    private static void drawTextInColumn(
+    // Returns the number of extra lines drawn (0 if fits in one line)
+    private static int drawTextInColumn(
         Canvas canvas, String text, float x, float y,
         int maxWidth, Paint paint)
     {
         if (paint.measureText(text) <= maxWidth)
         {
             canvas.drawText(text, x, y, paint);
-            return;
+            return 0;
         }
-        // Truncate
-        String ellipsis = "\u2026";
-        while (text.length() > 1 &&
-               paint.measureText(text + ellipsis) > maxWidth)
-        {
-            text = text.substring(0, text.length() - 1);
-        }
-        canvas.drawText(text + ellipsis, x, y, paint);
-    }
 
+        // Word-wrap
+        String[] words = text.split(" ");
+        StringBuilder line = new StringBuilder();
+        float lineY = y;
+        int extraLines = 0;
+
+        for (String word : words)
+        {
+            String test = line.length() == 0 ? word : line + " " + word;
+            if (paint.measureText(test) <= maxWidth)
+            {
+                line = new StringBuilder(test);
+            }
+            else
+            {
+                if (line.length() > 0)
+                {
+                    canvas.drawText(line.toString(), x, lineY, paint);
+                    lineY += paint.getTextSize() + 4;
+                    extraLines++;
+                }
+                line = new StringBuilder(word);
+            }
+        }
+        if (line.length() > 0)
+            canvas.drawText(line.toString(), x, lineY, paint);
+
+        return extraLines;
+    }
     /// Scale dimensions preserving aspect ratio within max bounds
     private static int[] scaledDims(int srcW, int srcH, int maxW, int maxH)
     {

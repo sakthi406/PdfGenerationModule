@@ -13,6 +13,7 @@ namespace PdfGenerationModule.Core
     {
         public string Title;
         public string SubTitle;
+        public string RefDocumentId;
         public string FooterText;
         public string LogoBase64;
         public DateTime GeneratedAt;
