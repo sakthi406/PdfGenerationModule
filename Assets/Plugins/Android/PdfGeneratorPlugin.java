@@ -1055,7 +1055,7 @@ public class PdfGeneratorPlugin {
                     row2BoldPaint, row2DateValuePaint, true, false, false, 0.90f);
             drawKeyValueOnNextLineInCell(canvas, doneByLine,
                     logoEndX + leftDateCellW, y, rightDoneByCellW, HDR_ROW_PROJ_NOS_H,
-                    row2BoldPaint, row2DoneByValuePaint);
+                    row2BoldPaint, row2DoneByValuePaint, true);
             y = projRowBot;
 
             // ── Row 3: checklist title (full mid width, centred) ──────
@@ -1088,8 +1088,8 @@ public class PdfGeneratorPlugin {
                     logoEndX, y, docCellW, HDR_ROW_GENERIC_H,
                     boldPaint, normalPaint, true);
             drawKeyValueInCell(canvas, unitFacilityLine,
-                    logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H,
-                    boldPaint, normalPaint, true);
+                    logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H + HDR_ROW_LOWER_H,
+                    boldPaint, normalPaint, false);
             y = lowerBlockMidY - 2;
 
             // ── Row 5: description (full middle width, inside header) ─
@@ -1336,7 +1336,8 @@ public class PdfGeneratorPlugin {
             int cellW,
             int cellH,
             Paint keyPaint,
-            Paint valuePaint) {
+            Paint valuePaint,
+            boolean centerAlign) {
         if (text == null || text.isEmpty()) {
             return;
         }
@@ -1350,16 +1351,17 @@ public class PdfGeneratorPlugin {
         String key = kv[0];
         String value = kv[1];
         float startX = cellX + 8f;
-        float topPad = 6f;
-        float keyBaseline = cellY + topPad + keyLocal.getTextSize();
-        canvas.drawText(key, startX, keyBaseline, keyLocal);
+        float availableW = Math.max(0f, cellW - 16f);
+        float keyStartX = centerAlign
+                ? (cellX + Math.max(8f, (cellW - keyLocal.measureText(key)) / 2f))
+                : startX;
 
         if (value.isEmpty()) {
+            float singleBaseline = cellY + (cellH / 2f) + (keyLocal.getTextSize() / 3f);
+            canvas.drawText(key, keyStartX, singleBaseline, keyLocal);
             return;
         }
 
-        float secondLineBaseline = keyBaseline + Math.max(6f, valueLocal.getTextSize() + 2f);
-        float availableW = Math.max(0f, cellW - 16f);
         String firstLine = value;
         String secondLine = "";
 
@@ -1378,11 +1380,26 @@ public class PdfGeneratorPlugin {
             secondLine = trimToWidth(secondLine, valueLocal, availableW);
         }
 
-        canvas.drawText(firstLine, startX, secondLineBaseline, valueLocal);
+        int valueLineCount = secondLine.isEmpty() ? 1 : 2;
+        float valueLineStep = valueLocal.getTextSize() + 2f;
+        float blockHeight = keyLocal.getTextSize() + Math.max(6f, valueLineStep * valueLineCount);
+        float blockTop = cellY + Math.max(4f, (cellH - blockHeight) / 2f);
+        float keyBaseline = blockTop + keyLocal.getTextSize();
+        float secondLineBaseline = keyBaseline + Math.max(6f, valueLineStep);
+
+        canvas.drawText(key, keyStartX, keyBaseline, keyLocal);
+
+        float firstLineX = centerAlign
+                ? (cellX + Math.max(8f, (cellW - valueLocal.measureText(firstLine)) / 2f))
+                : startX;
+        canvas.drawText(firstLine, firstLineX, secondLineBaseline, valueLocal);
         if (!secondLine.isEmpty()) {
             float thirdLineBaseline = Math.min(cellY + cellH - 6f,
                     secondLineBaseline + valueLocal.getTextSize() + 2f);
-            canvas.drawText(secondLine, startX, thirdLineBaseline, valueLocal);
+            float secondLineX = centerAlign
+                    ? (cellX + Math.max(8f, (cellW - valueLocal.measureText(secondLine)) / 2f))
+                    : startX;
+            canvas.drawText(secondLine, secondLineX, thirdLineBaseline, valueLocal);
         }
     }
 
