@@ -62,8 +62,7 @@ public class PdfGeneratorPlugin {
     private static final int TOTAL_HEADER_H = HDR_ROW_TITLE_H
             + HDR_ROW_PROJ_NOS_H
             + HDR_ROW_GENERIC_H // checklist title
-            + HDR_ROW_GENERIC_H // company doc
-            + HDR_ROW_GENERIC_H; // contractor doc
+            + HDR_ROW_GENERIC_H; // company doc
 
     // ── Gap between header and body content ───────────────────────────────────────────
     private static final int HEADER_BODY_GAP = 35;
@@ -75,14 +74,16 @@ public class PdfGeneratorPlugin {
     // ── Optional evidence image layout (generic, data-driven) ───────────────────────
     private static final int MAX_ROW_IMAGES = 5;
     private static final int EVIDENCE_MAX_COLUMNS = 2;
-    private static final int EVIDENCE_MAX_IMAGE_W_PX = 241; // ~85 mm at 72dpi
-    private static final int EVIDENCE_MAX_IMAGE_H_PX = 184; // ~65 mm at 72dpi
-    private static final int EVIDENCE_IMAGE_GAP_X_PX = 14;
-    private static final int EVIDENCE_ROW_GAP_Y_PX = 12;
-    private static final int EVIDENCE_HEADING_GAP_Y_PX = 8;
-    private static final int EVIDENCE_BLOCK_TOP_GAP_PX = 8;
+    private static final int EVIDENCE_MAX_DOUBLE_IMAGE_W_PX = 252;
+    private static final int EVIDENCE_MAX_SINGLE_IMAGE_W_PX = 520;
+    private static final int EVIDENCE_MAX_IMAGE_H_PX = 248;
+    private static final int EVIDENCE_IMAGE_GAP_X_PX = 16;
+    private static final int EVIDENCE_ROW_GAP_Y_PX = 10;
+    private static final int EVIDENCE_BLOCK_TOP_GAP_PX = 6;
     private static final int EVIDENCE_BLOCK_BOTTOM_GAP_PX = 6;
     private static final int EVIDENCE_CAPTION_GAP_Y_PX = 6;
+    private static final int EVIDENCE_CELL_PAD_X_PX = 8;
+    private static final int EVIDENCE_CELL_PAD_Y_PX = 8;
     private static final String EVIDENCE_HEADING_TEXT = "Inspection Evidence";
 
     // ── Colours ───────────────────────────────────────────────────────────────────────
@@ -260,9 +261,9 @@ public class PdfGeneratorPlugin {
             // We need a throwaway Paint to measure text wrapping
             Paint measurePaint = makePaint(Color.BLACK, displayBodyFontSize, Typeface.NORMAL);
             int contentW = pageWidth - (margin * 2);
-            int colSnoW = (int) (contentW * COL_SNO_RATIO);
             int colLabelW = (int) (contentW * COL_LABEL_RATIO);
             int colCommentW = (int) (contentW * COL_COMMENT_RATIO);
+            int maxChecklistContentHOnFreshPage = pageBodyBottom - (firstY + headerRowH);
 
             boolean tableHeaderDrawnOnPage = false;
 
@@ -319,30 +320,74 @@ public class PdfGeneratorPlugin {
                                 measureWrappedLines(measurePaint, commentText, colCommentW - 12)
                         );
                         int rowH = Math.max(displayBodyFontSize + 14, 10 + wrappedLines * (displayBodyFontSize + 4));
+                        List<String> imagePaths = getRenderableImagePaths(row);
 
-                        if (y + rowH > pageBodyBottom) {
-                            // New page
+                        int firstEvidenceChunkH = 0;
+                        if (!imagePaths.isEmpty()) {
+                            int captionH = getEvidenceCaptionHeight(displayBodyFontSize);
+                            int firstRowImages = getImagesInVisualRow(imagePaths.size(), 0);
+                            int firstRowMaxH = getEvidenceRowMaxImageHeight(
+                                    imagePaths,
+                                    0,
+                                    firstRowImages,
+                                    contentW);
+                            if (firstRowMaxH > 0) {
+                                firstEvidenceChunkH = getEvidenceHeadingRowHeight(displayBodyFontSize)
+                                        + getEvidenceImageRowHeight(firstRowMaxH, captionH)
+                                        + EVIDENCE_ROW_GAP_Y_PX;
+                            }
+                        }
+
+                        if (firstEvidenceChunkH > 0
+                                && y + rowH + firstEvidenceChunkH > pageBodyBottom
+                                && rowH + firstEvidenceChunkH <= maxChecklistContentHOnFreshPage) {
                             pageCount++;
                             y = firstY;
+                            tableHeaderDrawnOnPage = false;
+                            r--;
+                            continue;
+                        }
 
-                            if (y + headerRowH > pageBodyBottom) {
+                        if (y + rowH > pageBodyBottom) {
+                            if (rowH <= maxChecklistContentHOnFreshPage) {
+                                // New page and retry this same row.
                                 pageCount++;
                                 y = firstY;
+                                tableHeaderDrawnOnPage = false;
+                                r--;
+                                continue;
                             }
-                            y += headerRowH;
-                            tableHeaderDrawnOnPage = true;
                         }
                         y += rowH;
 
-                        List<String> imagePaths = getRenderableImagePaths(row);
                         if (!imagePaths.isEmpty()) {
-                            int evidenceHeadingH = getEvidenceHeadingHeight(displayBodyFontSize);
                             int captionH = getEvidenceCaptionHeight(displayBodyFontSize);
-                            int evidenceY = y + EVIDENCE_BLOCK_TOP_GAP_PX + evidenceHeadingH + EVIDENCE_HEADING_GAP_Y_PX;
                             int imageIndex = 0;
+                            boolean drawHeading = true;
 
                             while (imageIndex < imagePaths.size()) {
-                                int rowImages = Math.min(EVIDENCE_MAX_COLUMNS, imagePaths.size() - imageIndex);
+                                if (!tableHeaderDrawnOnPage) {
+                                    if (y + headerRowH > pageBodyBottom) {
+                                        pageCount++;
+                                        y = firstY;
+                                    }
+                                    y += headerRowH;
+                                    tableHeaderDrawnOnPage = true;
+                                }
+
+                                if (drawHeading) {
+                                    int headingRowH = getEvidenceHeadingRowHeight(displayBodyFontSize);
+                                    if (y + headingRowH > pageBodyBottom) {
+                                        pageCount++;
+                                        y = firstY;
+                                        tableHeaderDrawnOnPage = false;
+                                        continue;
+                                    }
+                                    y += headingRowH;
+                                    drawHeading = false;
+                                }
+
+                                int rowImages = getImagesInVisualRow(imagePaths.size(), imageIndex);
                                 int rowMaxImageH = getEvidenceRowMaxImageHeight(
                                         imagePaths,
                                         imageIndex,
@@ -354,34 +399,37 @@ public class PdfGeneratorPlugin {
                                     continue;
                                 }
 
-                                int rowNeededH = rowMaxImageH + EVIDENCE_CAPTION_GAP_Y_PX + captionH;
-                                if (evidenceY + rowNeededH > pageBodyBottom) {
+                                int rowNeededH = getEvidenceImageRowHeight(rowMaxImageH, captionH);
+                                if (y + rowNeededH > pageBodyBottom) {
                                     pageCount++;
                                     y = firstY;
                                     tableHeaderDrawnOnPage = false;
-
-                                    if (y + headerRowH > pageBodyBottom) {
-                                        pageCount++;
-                                        y = firstY;
-                                    }
-                                    y += headerRowH;
-                                    tableHeaderDrawnOnPage = true;
-                                    evidenceY = y + EVIDENCE_BLOCK_TOP_GAP_PX + evidenceHeadingH + EVIDENCE_HEADING_GAP_Y_PX;
+                                    drawHeading = true;
                                     continue;
                                 }
 
-                                evidenceY += rowNeededH;
+                                y += rowNeededH;
                                 imageIndex += rowImages;
                                 if (imageIndex < imagePaths.size()) {
-                                    evidenceY += EVIDENCE_ROW_GAP_Y_PX;
+                                    if (y + EVIDENCE_ROW_GAP_Y_PX > pageBodyBottom) {
+                                        pageCount++;
+                                        y = firstY;
+                                        tableHeaderDrawnOnPage = false;
+                                        drawHeading = true;
+                                        continue;
+                                    }
+                                    y += EVIDENCE_ROW_GAP_Y_PX;
                                 }
                             }
-
-                            y = evidenceY + EVIDENCE_BLOCK_BOTTOM_GAP_PX;
                         }
                     }
                 }
                 y += sectionSpacing;
+            }
+
+            int signatureBlockHeight = (SIGNATURE_ROW_H * 6) + SIGNATURE_BLOCK_GAP + 24;
+            if (y + signatureBlockHeight > pageBodyBottom) {
+                pageCount++;
             }
 
             return pageCount;
@@ -450,8 +498,11 @@ public class PdfGeneratorPlugin {
             int currentPage = 1;
             int y = drawStructuredHeader(
                     canvas, headerRows, margin, margin,
-                    pageWidth, bodyFontSize, totalPages, currentPage);
+                    pageWidth, bodyFontSize, totalPages, currentPage,
+                    true);
             boolean tableHeaderDrawnOnPage = false;
+            int firstY = margin + TOTAL_HEADER_H + HEADER_BODY_GAP;
+            int maxChecklistContentHOnFreshPage = pageBodyBottom - (firstY + headerRowH);
 
             // ── Sections ──────────────────────────────────────────────
             if (sections != null) {
@@ -508,7 +559,8 @@ public class PdfGeneratorPlugin {
                                     canvas = page.getCanvas();
                                     y = drawStructuredHeader(
                                             canvas, headerRows, margin, margin,
-                                            pageWidth, bodyFontSize, totalPages, currentPage);
+                                            pageWidth, bodyFontSize, totalPages, currentPage,
+                                            true);
                                 }
 
                                 y = drawChecklistTableHeader(
@@ -531,6 +583,51 @@ public class PdfGeneratorPlugin {
                                     measureWrappedLines(bodyPaint, commentText, colCommentW - 12)
                             );
                             int rowH = Math.max(displayBodyFontSize + 14, 10 + wrappedLines * (displayBodyFontSize + 4));
+                            List<String> imagePaths = getRenderableImagePaths(row);
+                            int itemRowColor = altRow ? COLOR_ROW_ALT : COLOR_ROW_NORMAL;
+
+                            int firstEvidenceChunkH = 0;
+                            if (!imagePaths.isEmpty()) {
+                                int evidenceCaptionH = getEvidenceCaptionHeight(displayBodyFontSize);
+                                int firstRowImages = getImagesInVisualRow(imagePaths.size(), 0);
+                                int firstRowMaxH = getEvidenceRowMaxImageHeight(
+                                        imagePaths,
+                                        0,
+                                        firstRowImages,
+                                        contentW);
+                                if (firstRowMaxH > 0) {
+                                    firstEvidenceChunkH = getEvidenceHeadingRowHeight(displayBodyFontSize)
+                                            + getEvidenceImageRowHeight(firstRowMaxH, evidenceCaptionH)
+                                            + EVIDENCE_ROW_GAP_Y_PX;
+                                }
+                            }
+
+                            if (firstEvidenceChunkH > 0
+                                    && y + rowH + firstEvidenceChunkH > pageBodyBottom
+                                    && rowH + firstEvidenceChunkH <= maxChecklistContentHOnFreshPage) {
+                                drawFooter(canvas, footerText, footerPaint,
+                                        margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
+                                pdfDoc.finishPage(page);
+
+                                currentPage++;
+                                PdfDocument.PageInfo np
+                                        = new PdfDocument.PageInfo.Builder(
+                                                pageWidth, pageHeight,
+                                                currentPage).create();
+                                page = pdfDoc.startPage(np);
+                                canvas = page.getCanvas();
+
+                                y = drawStructuredHeader(
+                                        canvas, headerRows, margin, margin,
+                                        pageWidth, bodyFontSize, totalPages, currentPage,
+                                        true);
+                                tableHeaderDrawnOnPage = false;
+                                y = drawChecklistTableHeader(
+                                        canvas, margin, y, pageWidth, headerRowH,
+                                        colSnoW, colLabelW, colCommentW, colValueW,
+                                        headerCellPaint, borderPaint);
+                                tableHeaderDrawnOnPage = true;
+                            }
 
                             // ── Page overflow — start new page ────────
                             if (y + rowH > pageBodyBottom) {
@@ -549,7 +646,8 @@ public class PdfGeneratorPlugin {
                                 // ── Draw header on every new page ─────
                                 y = drawStructuredHeader(
                                         canvas, headerRows, margin, margin,
-                                        pageWidth, bodyFontSize, totalPages, currentPage);
+                                        pageWidth, bodyFontSize, totalPages, currentPage,
+                                        true);
                                 tableHeaderDrawnOnPage = false;
                                 y = drawChecklistTableHeader(
                                         canvas, margin, y, pageWidth, headerRowH,
@@ -559,7 +657,7 @@ public class PdfGeneratorPlugin {
                             }
 
                             Paint bgPaint = new Paint();
-                            bgPaint.setColor(altRow ? COLOR_ROW_ALT : COLOR_ROW_NORMAL);
+                            bgPaint.setColor(itemRowColor);
                             bgPaint.setStyle(Paint.Style.FILL);
                             int rowTop = y;
                             int rowBottom = rowTop + rowH;
@@ -594,30 +692,88 @@ public class PdfGeneratorPlugin {
                                     margin + colSnoW + colLabelW + colCommentW, rowTop,
                                     margin + colSnoW + colLabelW + colCommentW, rowBottom, borderPaint);
 
-                            altRow = !altRow;
                             serialNo++;
 
                             y += rowH;
 
-                            List<String> imagePaths = getRenderableImagePaths(row);
                             if (!imagePaths.isEmpty()) {
                                 Paint evidenceTitlePaint = makePaint(COLOR_TITLE, displayBodyFontSize, Typeface.BOLD);
                                 Paint evidenceCaptionPaint = makePaint(Color.parseColor("#444444"), Math.max(10, displayBodyFontSize - 1), Typeface.NORMAL);
 
-                                int evidenceHeadingH = getEvidenceHeadingHeight(displayBodyFontSize);
                                 int evidenceCaptionH = getEvidenceCaptionHeight(displayBodyFontSize);
-                                int evidenceY = y + EVIDENCE_BLOCK_TOP_GAP_PX;
                                 int imageIndex = 0;
                                 boolean drawEvidenceHeading = true;
 
                                 while (imageIndex < imagePaths.size()) {
-                                    if (drawEvidenceHeading) {
-                                        int headingBaseline = evidenceY + displayBodyFontSize;
-                                        canvas.drawText(EVIDENCE_HEADING_TEXT, margin, headingBaseline, evidenceTitlePaint);
-                                        evidenceY += evidenceHeadingH + EVIDENCE_HEADING_GAP_Y_PX;
+                                    if (!tableHeaderDrawnOnPage) {
+                                        if (y + headerRowH > pageBodyBottom) {
+                                            drawFooter(canvas, footerText, footerPaint,
+                                                    margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
+                                            pdfDoc.finishPage(page);
+
+                                            currentPage++;
+                                            PdfDocument.PageInfo np
+                                                    = new PdfDocument.PageInfo.Builder(
+                                                            pageWidth, pageHeight,
+                                                            currentPage).create();
+                                            page = pdfDoc.startPage(np);
+                                            canvas = page.getCanvas();
+
+                                            y = drawStructuredHeader(
+                                                    canvas, headerRows, margin, margin,
+                                                    pageWidth, bodyFontSize, totalPages, currentPage,
+                                                    true);
+                                        }
+
+                                        y = drawChecklistTableHeader(
+                                                canvas, margin, y, pageWidth, headerRowH,
+                                                colSnoW, colLabelW, colCommentW, colValueW,
+                                                headerCellPaint, borderPaint);
+                                        tableHeaderDrawnOnPage = true;
                                     }
 
-                                    int imagesInVisualRow = Math.min(EVIDENCE_MAX_COLUMNS, imagePaths.size() - imageIndex);
+                                    if (drawEvidenceHeading) {
+                                        int headingRowH = getEvidenceHeadingRowHeight(displayBodyFontSize);
+                                        if (y + headingRowH > pageBodyBottom) {
+                                            drawFooter(canvas, footerText, footerPaint,
+                                                    margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
+                                            pdfDoc.finishPage(page);
+
+                                            currentPage++;
+                                            PdfDocument.PageInfo np
+                                                    = new PdfDocument.PageInfo.Builder(
+                                                            pageWidth, pageHeight,
+                                                            currentPage).create();
+                                            page = pdfDoc.startPage(np);
+                                            canvas = page.getCanvas();
+
+                                            y = drawStructuredHeader(
+                                                    canvas, headerRows, margin, margin,
+                                                    pageWidth, bodyFontSize, totalPages, currentPage,
+                                                    true);
+                                            tableHeaderDrawnOnPage = false;
+                                            continue;
+                                        }
+
+                                        Paint headingBgPaint = new Paint();
+                                        headingBgPaint.setColor(itemRowColor);
+                                        headingBgPaint.setStyle(Paint.Style.FILL);
+                                        canvas.drawRect(margin, y, pageWidth - margin, y + headingRowH, headingBgPaint);
+                                        canvas.drawRect(margin, y, pageWidth - margin, y + headingRowH, borderPaint);
+
+                                        drawTextCentredInCell(
+                                                canvas,
+                                                EVIDENCE_HEADING_TEXT,
+                                                margin,
+                                                y,
+                                                contentW,
+                                                headingRowH,
+                                                evidenceTitlePaint);
+                                        y += headingRowH;
+                                        drawEvidenceHeading = false;
+                                    }
+
+                                    int imagesInVisualRow = getImagesInVisualRow(imagePaths.size(), imageIndex);
                                     int rowMaxImageH = getEvidenceRowMaxImageHeight(
                                             imagePaths,
                                             imageIndex,
@@ -629,8 +785,8 @@ public class PdfGeneratorPlugin {
                                         continue;
                                     }
 
-                                    int evidenceRowH = rowMaxImageH + EVIDENCE_CAPTION_GAP_Y_PX + evidenceCaptionH;
-                                    if (evidenceY + evidenceRowH > pageBodyBottom) {
+                                    int evidenceRowH = getEvidenceImageRowHeight(rowMaxImageH, evidenceCaptionH);
+                                    if (y + evidenceRowH > pageBodyBottom) {
                                         drawFooter(canvas, footerText, footerPaint,
                                                 margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
                                         pdfDoc.finishPage(page);
@@ -645,22 +801,25 @@ public class PdfGeneratorPlugin {
 
                                         y = drawStructuredHeader(
                                                 canvas, headerRows, margin, margin,
-                                                pageWidth, bodyFontSize, totalPages, currentPage);
-                                        y = drawChecklistTableHeader(
-                                                canvas, margin, y, pageWidth, headerRowH,
-                                                colSnoW, colLabelW, colCommentW, colValueW,
-                                                headerCellPaint, borderPaint);
-                                        tableHeaderDrawnOnPage = true;
-
-                                        evidenceY = y + EVIDENCE_BLOCK_TOP_GAP_PX;
+                                                pageWidth, bodyFontSize, totalPages, currentPage,
+                                                true);
+                                        tableHeaderDrawnOnPage = false;
                                         drawEvidenceHeading = true;
                                         continue;
                                     }
 
-                                    int availableW = contentW;
+                                    Paint evidenceBgPaint = new Paint();
+                                    evidenceBgPaint.setColor(itemRowColor);
+                                    evidenceBgPaint.setStyle(Paint.Style.FILL);
+                                    canvas.drawRect(margin, y, pageWidth - margin, y + evidenceRowH, evidenceBgPaint);
+                                    canvas.drawRect(margin, y, pageWidth - margin, y + evidenceRowH, borderPaint);
+
+                                    int availableW = contentW - (EVIDENCE_CELL_PAD_X_PX * 2);
                                     int totalGapW = imagesInVisualRow > 1 ? EVIDENCE_IMAGE_GAP_X_PX : 0;
                                     int cellW = (availableW - totalGapW) / imagesInVisualRow;
-                                    int drawMaxW = Math.min(EVIDENCE_MAX_IMAGE_W_PX, cellW);
+                                    int drawMaxW = getEvidenceDrawMaxWidth(contentW, imagesInVisualRow);
+                                    int rowStartX = margin + EVIDENCE_CELL_PAD_X_PX;
+                                    int imageY = y + EVIDENCE_CELL_PAD_Y_PX;
 
                                     for (int col = 0; col < imagesInVisualRow; col++) {
                                         int imageGlobalIndex = imageIndex + col;
@@ -676,9 +835,8 @@ public class PdfGeneratorPlugin {
                                                 drawMaxW,
                                                 EVIDENCE_MAX_IMAGE_H_PX);
 
-                                        int cellStartX = margin + (col * (cellW + EVIDENCE_IMAGE_GAP_X_PX));
+                                        int cellStartX = rowStartX + (col * (cellW + EVIDENCE_IMAGE_GAP_X_PX));
                                         int imageX = cellStartX + Math.max(0, (cellW - drawDims[0]) / 2);
-                                        int imageY = evidenceY;
 
                                         Bitmap bmp = BitmapFactory.decodeFile(imagePath);
                                         if (bmp != null) {
@@ -704,16 +862,38 @@ public class PdfGeneratorPlugin {
                                                 evidenceCaptionPaint);
                                     }
 
-                                    evidenceY += evidenceRowH;
+                                    y += evidenceRowH;
                                     imageIndex += imagesInVisualRow;
                                     drawEvidenceHeading = false;
                                     if (imageIndex < imagePaths.size()) {
-                                        evidenceY += EVIDENCE_ROW_GAP_Y_PX;
+                                        if (y + EVIDENCE_ROW_GAP_Y_PX > pageBodyBottom) {
+                                            drawFooter(canvas, footerText, footerPaint,
+                                                    margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
+                                            pdfDoc.finishPage(page);
+
+                                            currentPage++;
+                                            PdfDocument.PageInfo np
+                                                    = new PdfDocument.PageInfo.Builder(
+                                                            pageWidth, pageHeight,
+                                                            currentPage).create();
+                                            page = pdfDoc.startPage(np);
+                                            canvas = page.getCanvas();
+
+                                            y = drawStructuredHeader(
+                                                    canvas, headerRows, margin, margin,
+                                                    pageWidth, bodyFontSize, totalPages, currentPage,
+                                                    true);
+                                            tableHeaderDrawnOnPage = false;
+                                            drawEvidenceHeading = true;
+                                        } else {
+                                            y += EVIDENCE_ROW_GAP_Y_PX;
+                                        }
                                     }
                                 }
 
-                                y = evidenceY + EVIDENCE_BLOCK_BOTTOM_GAP_PX;
                             }
+
+                            altRow = !altRow;
                         }
                     }
                     y += sectionSpacing;
@@ -732,7 +912,8 @@ public class PdfGeneratorPlugin {
                 page = pdfDoc.startPage(np);
                 canvas = page.getCanvas();
                 y = drawStructuredHeader(canvas, headerRows, margin, margin,
-                        pageWidth, bodyFontSize, totalPages, currentPage);
+                        pageWidth, bodyFontSize, totalPages, currentPage,
+                        true);
             }
 
             y = drawSignatureSection(canvas, margin, y, pageWidth, displayBodyFontSize,
@@ -778,8 +959,9 @@ public class PdfGeneratorPlugin {
             int startY,
             int pageWidth,
             int bodyFontSize,
-            int totalPages,
-            int currentPage) {
+            int totalChecklistPages,
+            int checklistPage,
+            boolean showSheetNumber) {
         try {
             if (rows == null || rows.length() < 6) {
                 Log.w(TAG, "drawStructuredHeader: expected 6 rows, got "
@@ -828,7 +1010,15 @@ public class PdfGeneratorPlugin {
             String rightLogoB64 = row0.optString("Value", "");
 
             drawLogoInCell(canvas, leftLogoB64, x, y, logoColW, TOTAL_HEADER_H);
-            drawLogoInCell(canvas, rightLogoB64, midEndX, y, rightColW, TOTAL_HEADER_H);
+
+            // Reserve the lower band of the right panel for Sheet Number.
+            int rightSheetBandH = HDR_ROW_GENERIC_H;
+            int rightLogoAreaH = TOTAL_HEADER_H - rightSheetBandH;
+            int rightSheetTop = y + rightLogoAreaH;
+            canvas.drawLine(midEndX, rightSheetTop, midEndX + rightColW, rightSheetTop, hdrBorderPaint);
+
+            // Reduce padding so right logos stay readable in print while preserving aspect ratio.
+            drawLogoInCell(canvas, rightLogoB64, midEndX, y, rightColW, rightLogoAreaH, 2, 2);
 
             // ── Row 1: project title ───────────────────────────────────
             JSONObject row1 = rows.getJSONObject(HEADER_ROW_PROJECT_TITLE);
@@ -840,10 +1030,10 @@ public class PdfGeneratorPlugin {
                     logoEndX, titleRowTop, midColW, HDR_ROW_TITLE_H, titlePaint);
             y = titleRowBot;
 
-            // ── Row 2: project numbers (split into two halves) ────────
+            // ── Row 2: date and inspector (split into two halves) ─────
             JSONObject row2 = rows.getJSONObject(HEADER_ROW_PROJECT_NOS);
-            String[] companyParts = splitCell(row2.optString("Label", ""));
-            String[] contractorParts = splitCell(row2.optString("Value", ""));
+            String dateLine = row2.optString("Label", "");
+            String doneByLine = row2.optString("Value", "");
             int halfMid = midColW / 2;
             int projRowBot = y + HDR_ROW_PROJ_NOS_H;
 
@@ -851,18 +1041,11 @@ public class PdfGeneratorPlugin {
             // vertical split inside mid column
             canvas.drawLine(logoEndX + halfMid, y, logoEndX + halfMid, projRowBot, hdrBorderPaint);
 
-            // company project no — label top half, value bottom half
-            int halfH = HDR_ROW_PROJ_NOS_H / 2;
-            drawTextCentredInCell(canvas, companyParts[0],
-                    logoEndX, y, halfMid, halfH, boldPaint);
-            drawTextCentredInCell(canvas, companyParts.length > 1 ? companyParts[1] : "",
-                    logoEndX, y + halfH, halfMid, halfH, normalPaint);
-
-            // contractor project no
-            drawTextCentredInCell(canvas, contractorParts[0],
-                    logoEndX + halfMid, y, halfMid, halfH, boldPaint);
-            drawTextCentredInCell(canvas, contractorParts.length > 1 ? contractorParts[1] : "",
-                    logoEndX + halfMid, y + halfH, halfMid, halfH, normalPaint);
+            // Date and inspector are each centred in their full half-cell.
+            drawTextCentredInCell(canvas, dateLine,
+                    logoEndX, y, halfMid, HDR_ROW_PROJ_NOS_H, boldPaint);
+            drawTextCentredInCell(canvas, doneByLine,
+                    logoEndX + halfMid, y, halfMid, HDR_ROW_PROJ_NOS_H, boldPaint);
             y = projRowBot;
 
             // ── Row 3: checklist title (full mid width, centred) ──────
@@ -886,10 +1069,10 @@ public class PdfGeneratorPlugin {
             // vertical split doc | revision
             canvas.drawLine(logoEndX + docCellW, y, logoEndX + docCellW, docRowBot, hdrBorderPaint);
 
-            // "COMPANY DOC. NO.:  AD-xxx" drawn left-aligned
+            // Keep tag number text on one line and centred within the left cell.
             String companyDocLine = (docParts[0] + ":  " + (docParts.length > 1 ? docParts[1] : ""));
-            drawTextLeftInCell(canvas, companyDocLine, logoEndX + 6, y,
-                    docCellW - 8, HDR_ROW_GENERIC_H, leftPaint);
+            drawTextCentredInCell(canvas, companyDocLine,
+                    logoEndX, y, docCellW, HDR_ROW_GENERIC_H, boldPaint);
             drawTextCentredInCell(canvas, revision,
                     logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H, boldPaint);
             y = docRowBot;
@@ -897,19 +1080,34 @@ public class PdfGeneratorPlugin {
             // ── Row 5: contractor doc no (left ~75%) | page X/Y (right ~25%) ─
             JSONObject row5 = rows.getJSONObject(HEADER_ROW_CONTRACTOR_DOC);
             String[] ctorParts = splitCell(row5.optString("Label", ""));
-            int ctorRowBot = y + HDR_ROW_GENERIC_H;
+            int ctorRowBot = y;
 
-            // Note: no bottom border drawn here — outer border covers it
-            canvas.drawLine(logoEndX + docCellW, y, logoEndX + docCellW, ctorRowBot, hdrBorderPaint);
+            // Keep sheet number inside right logo panel only.
+            if (showSheetNumber) {
+                String sheetLabel = (ctorParts[0] == null || ctorParts[0].trim().isEmpty())
+                        ? "Sheet Number"
+                        : ctorParts[0].trim();
+                String pageLabel = checklistPage + "/" + totalChecklistPages;
+                int sheetLabelH = HDR_ROW_GENERIC_H / 2;
+                int sheetValueH = HDR_ROW_GENERIC_H - sheetLabelH;
 
-            String ctorDocLine = (ctorParts[0] + ":  " + (ctorParts.length > 1 ? ctorParts[1] : ""));
-            drawTextLeftInCell(canvas, ctorDocLine, logoEndX + 6, y,
-                    docCellW - 8, HDR_ROW_GENERIC_H, leftPaint);
-
-            // ── Page number — "currentPage / totalPages" format ───────
-            String pageLabel = currentPage + "/" + totalPages;
-            drawTextCentredInCell(canvas, pageLabel,
-                    logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H, boldPaint);
+                drawTextCentredInCell(
+                        canvas,
+                        sheetLabel,
+                        midEndX,
+                        rightSheetTop,
+                        rightColW,
+                        sheetLabelH,
+                        boldPaint);
+                drawTextCentredInCell(
+                        canvas,
+                        pageLabel,
+                        midEndX,
+                        rightSheetTop + sheetLabelH,
+                        rightColW,
+                        sheetValueH,
+                        normalPaint);
+            }
 
             y = ctorRowBot;
 
@@ -929,6 +1127,13 @@ public class PdfGeneratorPlugin {
     private static void drawLogoInCell(
             Canvas canvas, String base64,
             int cellX, int cellY, int cellW, int cellH) {
+        drawLogoInCell(canvas, base64, cellX, cellY, cellW, cellH, 10, 10);
+    }
+
+    private static void drawLogoInCell(
+            Canvas canvas, String base64,
+            int cellX, int cellY, int cellW, int cellH,
+            int padX, int padY) {
         if (base64 == null || base64.isEmpty()) {
             return;
         }
@@ -940,7 +1145,8 @@ public class PdfGeneratorPlugin {
             }
 
             int[] dims = scaledDims(bmp.getWidth(), bmp.getHeight(),
-                    cellW - 10, cellH - 10);
+                    Math.max(1, cellW - (padX * 2)),
+                    Math.max(1, cellH - (padY * 2)));
             int lx = cellX + (cellW - dims[0]) / 2;
             int ly = cellY + (cellH - dims[1]) / 2;
             canvas.drawBitmap(bmp, null,
@@ -1161,12 +1367,74 @@ public class PdfGeneratorPlugin {
         }
     }
 
-    private static int getEvidenceHeadingHeight(int displayBodyFontSize) {
-        return Math.max(displayBodyFontSize + 2, 14);
+    private static boolean hasChecklistRows(JSONArray sections) {
+        if (sections == null) {
+            return false;
+        }
+
+        try {
+            for (int s = 0; s < sections.length(); s++) {
+                JSONObject section = sections.getJSONObject(s);
+                String sectionTitle = section.optString("SectionTitle", "");
+                if (HEADER_SECTION_MARKER.equals(sectionTitle)) {
+                    continue;
+                }
+
+                JSONArray rows = section.optJSONArray("Rows");
+                if (rows == null) {
+                    continue;
+                }
+
+                for (int r = 0; r < rows.length(); r++) {
+                    JSONObject row = rows.getJSONObject(r);
+                    if (!row.optBoolean("IsHeaderRow", false)
+                            && !row.optBoolean("IsNoteRow", false)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "hasChecklistRows scan failed: " + e.getMessage());
+        }
+
+        return false;
+    }
+
+    private static int getEvidenceHeadingRowHeight(int displayBodyFontSize) {
+        return Math.max(displayBodyFontSize + 12, 22);
     }
 
     private static int getEvidenceCaptionHeight(int displayBodyFontSize) {
         return Math.max(displayBodyFontSize + 2, 12);
+    }
+
+    private static int getImagesInVisualRow(int totalImages, int startIndex) {
+        int remaining = totalImages - startIndex;
+        if (remaining <= 0) {
+            return 0;
+        }
+        if (remaining == 1) {
+            return 1;
+        }
+        return Math.min(EVIDENCE_MAX_COLUMNS, remaining);
+    }
+
+    private static int getEvidenceDrawMaxWidth(int contentW, int imageCount) {
+        int totalGapW = imageCount > 1 ? (imageCount - 1) * EVIDENCE_IMAGE_GAP_X_PX : 0;
+        int availableW = contentW - (EVIDENCE_CELL_PAD_X_PX * 2);
+        int cellW = (availableW - totalGapW) / imageCount;
+        int cellInnerW = Math.max(1, cellW - (EVIDENCE_CELL_PAD_X_PX * 2));
+        if (imageCount == 1) {
+            return Math.min(EVIDENCE_MAX_SINGLE_IMAGE_W_PX, cellInnerW);
+        }
+        return Math.min(EVIDENCE_MAX_DOUBLE_IMAGE_W_PX, cellInnerW);
+    }
+
+    private static int getEvidenceImageRowHeight(int rowMaxImageH, int captionH) {
+        return (EVIDENCE_CELL_PAD_Y_PX * 2)
+                + rowMaxImageH
+                + EVIDENCE_CAPTION_GAP_Y_PX
+                + captionH;
     }
 
     private static int getEvidenceRowMaxImageHeight(
@@ -1178,9 +1446,7 @@ public class PdfGeneratorPlugin {
             return 0;
         }
 
-        int totalGapW = imageCount > 1 ? EVIDENCE_IMAGE_GAP_X_PX : 0;
-        int cellW = (contentW - totalGapW) / imageCount;
-        int drawMaxW = Math.min(EVIDENCE_MAX_IMAGE_W_PX, cellW);
+        int drawMaxW = getEvidenceDrawMaxWidth(contentW, imageCount);
 
         int maxH = 0;
         for (int i = 0; i < imageCount; i++) {
