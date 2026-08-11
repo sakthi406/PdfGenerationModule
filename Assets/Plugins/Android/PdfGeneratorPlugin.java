@@ -55,14 +55,16 @@ public class PdfGeneratorPlugin {
 
     // ── Header row heights (px) ───────────────────────────────────────────────────────
     private static final int HDR_ROW_TITLE_H = 80; // project title row
-    private static final int HDR_ROW_PROJ_NOS_H = 50; // company/contractor project nos
-    private static final int HDR_ROW_GENERIC_H = 35; // checklist title, doc no, contractor doc
+    private static final int HDR_ROW_PROJ_NOS_H = 58; // company/contractor project nos
+    private static final int HDR_ROW_GENERIC_H = 40; // checklist title, doc no
+    private static final int HDR_ROW_LOWER_H = 38; // description row inside header
 
     // ── Total header height (sum of all row heights) ──────────────────────────────────
     private static final int TOTAL_HEADER_H = HDR_ROW_TITLE_H
             + HDR_ROW_PROJ_NOS_H
             + HDR_ROW_GENERIC_H // checklist title
-            + HDR_ROW_GENERIC_H; // company doc
+            + HDR_ROW_GENERIC_H // tag/unit row
+            + HDR_ROW_LOWER_H; // description row
 
     // ── Gap between header and body content ───────────────────────────────────────────
     private static final int HEADER_BODY_GAP = 35;
@@ -427,7 +429,7 @@ public class PdfGeneratorPlugin {
                 y += sectionSpacing;
             }
 
-            int signatureBlockHeight = (SIGNATURE_ROW_H * 6) + SIGNATURE_BLOCK_GAP + 24;
+            int signatureBlockHeight = (SIGNATURE_ROW_H * 9) + SIGNATURE_BLOCK_GAP + 24;
             if (y + signatureBlockHeight > pageBodyBottom) {
                 pageCount++;
             }
@@ -900,7 +902,7 @@ public class PdfGeneratorPlugin {
                 }
             }
 
-            int signatureBlockHeight = (SIGNATURE_ROW_H * 6) + SIGNATURE_BLOCK_GAP + 24;
+            int signatureBlockHeight = (SIGNATURE_ROW_H * 9) + SIGNATURE_BLOCK_GAP + 24;
             if (y + signatureBlockHeight > pageHeight - (margin + rowSpacing * 2)) {
                 drawFooter(canvas, footerText, footerPaint,
                         margin, pageWidth, pageHeight, rowSpacing, dividerPaint);
@@ -993,7 +995,13 @@ public class PdfGeneratorPlugin {
             Paint normalPaint = makePaint(Color.BLACK, bodyFontSize - 1, Typeface.NORMAL);
             normalPaint.setTextAlign(Paint.Align.CENTER);
 
-            Paint leftPaint = makePaint(Color.BLACK, bodyFontSize - 1, Typeface.BOLD);
+            // Slightly smaller text only for the date/done-by split row to prevent truncation.
+            Paint row2BoldPaint = makePaint(Color.BLACK, bodyFontSize - 1, Typeface.BOLD);
+            row2BoldPaint.setTextAlign(Paint.Align.CENTER);
+            Paint row2DateValuePaint = makePaint(Color.BLACK, Math.max(10, bodyFontSize - 2), Typeface.NORMAL);
+            row2DateValuePaint.setTextAlign(Paint.Align.CENTER);
+            Paint row2DoneByValuePaint = makePaint(Color.BLACK, bodyFontSize - 1, Typeface.NORMAL);
+            row2DoneByValuePaint.setTextAlign(Paint.Align.CENTER);
 
             // ── Outer border ───────────────────────────────────────────
             canvas.drawRect(x, y, x + contentW, y + TOTAL_HEADER_H, hdrBorderPaint);
@@ -1012,7 +1020,7 @@ public class PdfGeneratorPlugin {
             drawLogoInCell(canvas, leftLogoB64, x, y, logoColW, TOTAL_HEADER_H);
 
             // Reserve the lower band of the right panel for Sheet Number.
-            int rightSheetBandH = HDR_ROW_GENERIC_H;
+            int rightSheetBandH = HDR_ROW_GENERIC_H + HDR_ROW_LOWER_H;
             int rightLogoAreaH = TOTAL_HEADER_H - rightSheetBandH;
             int rightSheetTop = y + rightLogoAreaH;
             canvas.drawLine(midEndX, rightSheetTop, midEndX + rightColW, rightSheetTop, hdrBorderPaint);
@@ -1034,53 +1042,60 @@ public class PdfGeneratorPlugin {
             JSONObject row2 = rows.getJSONObject(HEADER_ROW_PROJECT_NOS);
             String dateLine = row2.optString("Label", "");
             String doneByLine = row2.optString("Value", "");
-            int halfMid = midColW / 2;
+            int leftDateCellW = (int) (midColW * 0.58f);
+            int rightDoneByCellW = midColW - leftDateCellW;
             int projRowBot = y + HDR_ROW_PROJ_NOS_H;
 
             canvas.drawLine(logoEndX, projRowBot, midEndX, projRowBot, hdrBorderPaint);
             // vertical split inside mid column
-            canvas.drawLine(logoEndX + halfMid, y, logoEndX + halfMid, projRowBot, hdrBorderPaint);
+            canvas.drawLine(logoEndX + leftDateCellW, y, logoEndX + leftDateCellW, projRowBot, hdrBorderPaint);
 
-            // Date and inspector are each centred in their full half-cell.
-            drawTextCentredInCell(canvas, dateLine,
-                    logoEndX, y, halfMid, HDR_ROW_PROJ_NOS_H, boldPaint);
-            drawTextCentredInCell(canvas, doneByLine,
-                    logoEndX + halfMid, y, halfMid, HDR_ROW_PROJ_NOS_H, boldPaint);
+            drawKeyValueInCell(canvas, dateLine,
+                    logoEndX, y, leftDateCellW, HDR_ROW_PROJ_NOS_H,
+                    row2BoldPaint, row2DateValuePaint, true, false, false, 0.90f);
+            drawKeyValueOnNextLineInCell(canvas, doneByLine,
+                    logoEndX + leftDateCellW, y, rightDoneByCellW, HDR_ROW_PROJ_NOS_H,
+                    row2BoldPaint, row2DoneByValuePaint);
             y = projRowBot;
 
             // ── Row 3: checklist title (full mid width, centred) ──────
             JSONObject row3 = rows.getJSONObject(HEADER_ROW_CHECKLIST_TITLE);
-            String checklistTitle = row3.optString("Label", "");
+            String deviceLine = row3.optString("Label", "");
+            String descriptionLine = row3.optString("Value", "");
             int chkRowBot = y + HDR_ROW_GENERIC_H;
             canvas.drawLine(logoEndX, chkRowBot, midEndX, chkRowBot, hdrBorderPaint);
-            drawTextCentredInCell(canvas, checklistTitle,
-                    logoEndX, y, midColW, HDR_ROW_GENERIC_H, boldPaint);
+            drawKeyValueInCell(canvas, deviceLine,
+                    logoEndX, y, midColW, HDR_ROW_GENERIC_H,
+                    boldPaint, normalPaint, true);
             y = chkRowBot;
 
-            // ── Row 4: company doc no (left ~75%) | revision (right ~25%) ─
+            // ── Row 4: tag number (left) | unit/facility (right) ─
             JSONObject row4 = rows.getJSONObject(HEADER_ROW_COMPANY_DOC);
             String[] docParts = splitCell(row4.optString("Label", ""));
-            String revision = row4.optString("Value", "");
-            int docCellW = (int) (midColW * 0.75f);
+            String unitFacilityLine = row4.optString("Value", "");
+            int docCellW = (int) (midColW * 0.66f);
             int revCellW = midColW - docCellW;
-            int docRowBot = y + HDR_ROW_GENERIC_H;
+            int lowerBlockMidY = y + HDR_ROW_GENERIC_H;
+            int lowerBlockBot = y + HDR_ROW_GENERIC_H + HDR_ROW_LOWER_H;
 
-            canvas.drawLine(logoEndX, docRowBot, midEndX, docRowBot, hdrBorderPaint);
-            // vertical split doc | revision
-            canvas.drawLine(logoEndX + docCellW, y, logoEndX + docCellW, docRowBot, hdrBorderPaint);
+            // Keep Description inside the same left content box as the tag number.
+            // Unit / Facility remains the right cell spanning the full lower block height.
+            canvas.drawLine(logoEndX, lowerBlockBot, midEndX, lowerBlockBot, hdrBorderPaint);
+            canvas.drawLine(logoEndX + docCellW, y, logoEndX + docCellW, lowerBlockBot, hdrBorderPaint);
 
-            // Keep tag number text on one line and centred within the left cell.
-            String companyDocLine = (docParts[0] + ":  " + (docParts.length > 1 ? docParts[1] : ""));
-            drawTextCentredInCell(canvas, companyDocLine,
-                    logoEndX, y, docCellW, HDR_ROW_GENERIC_H, boldPaint);
-            drawTextCentredInCell(canvas, revision,
-                    logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H, boldPaint);
-            y = docRowBot;
+            String tagLine = (docParts[0] + ": " + (docParts.length > 1 ? docParts[1] : ""));
+            drawKeyValueInCell(canvas, tagLine,
+                    logoEndX, y, docCellW, HDR_ROW_GENERIC_H,
+                    boldPaint, normalPaint, true);
+            drawKeyValueInCell(canvas, unitFacilityLine,
+                    logoEndX + docCellW, y, revCellW, HDR_ROW_GENERIC_H,
+                    boldPaint, normalPaint, true);
+            y = lowerBlockMidY - 2;
 
-            // ── Row 5: contractor doc no (left ~75%) | page X/Y (right ~25%) ─
+            // ── Row 5: description (full middle width, inside header) ─
             JSONObject row5 = rows.getJSONObject(HEADER_ROW_CONTRACTOR_DOC);
             String[] ctorParts = splitCell(row5.optString("Label", ""));
-            int ctorRowBot = y;
+            int ctorRowBot = y + HDR_ROW_LOWER_H;
 
             // Keep sheet number inside right logo panel only.
             if (showSheetNumber) {
@@ -1088,8 +1103,8 @@ public class PdfGeneratorPlugin {
                         ? "Sheet Number"
                         : ctorParts[0].trim();
                 String pageLabel = checklistPage + "/" + totalChecklistPages;
-                int sheetLabelH = HDR_ROW_GENERIC_H / 2;
-                int sheetValueH = HDR_ROW_GENERIC_H - sheetLabelH;
+                int sheetLabelH = rightSheetBandH / 2;
+                int sheetValueH = rightSheetBandH - sheetLabelH;
 
                 drawTextCentredInCell(
                         canvas,
@@ -1108,6 +1123,11 @@ public class PdfGeneratorPlugin {
                         sheetValueH,
                         normalPaint);
             }
+
+            // Draw Description in the existing centre band aligned with the right sheet band.
+            drawKeyValueInCell(canvas, descriptionLine,
+                    logoEndX, y, docCellW, HDR_ROW_LOWER_H,
+                    boldPaint, normalPaint, true, true, false, 0.90f);
 
             y = ctorRowBot;
 
@@ -1171,6 +1191,225 @@ public class PdfGeneratorPlugin {
         float ty = cellY + (cellH / 2f) + (paint.getTextSize() / 3f);
         canvas.drawText(text, tx, ty, paint);
         paint.setTextAlign(savedAlign);
+    }
+
+    /**
+     * Draw "Key: Value" with bold key and normal value inside a single cell.
+     */
+    private static void drawKeyValueInCell(
+            Canvas canvas,
+            String text,
+            int cellX,
+            int cellY,
+            int cellW,
+            int cellH,
+            Paint keyPaint,
+            Paint valuePaint,
+            boolean leftAlign) {
+        drawKeyValueInCell(canvas, text, cellX, cellY, cellW, cellH,
+                keyPaint, valuePaint, leftAlign, false, true, 0.70f);
+    }
+
+    private static void drawKeyValueInCell(
+            Canvas canvas,
+            String text,
+            int cellX,
+            int cellY,
+            int cellW,
+            int cellH,
+            Paint keyPaint,
+            Paint valuePaint,
+            boolean leftAlign,
+            boolean allowValueWrap,
+            boolean shrinkKeyIfNeeded,
+            float minValueSizeRatio) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+
+        Paint keyLocal = new Paint(keyPaint);
+        Paint valueLocal = new Paint(valuePaint);
+        keyLocal.setTextAlign(Paint.Align.LEFT);
+        valueLocal.setTextAlign(Paint.Align.LEFT);
+
+        String[] kv = splitKeyValue(text);
+        String key = kv[0];
+        String value = kv[1];
+        String spacer = value.isEmpty() ? "" : " ";
+
+        float availableW = Math.max(0f, cellW - 16f);
+        float minKeySize = keyLocal.getTextSize() * 0.70f;
+        float keyW = keyLocal.measureText(key);
+        while (shrinkKeyIfNeeded && keyW > availableW * 0.66f && keyLocal.getTextSize() > minKeySize) {
+            keyLocal.setTextSize(keyLocal.getTextSize() * 0.95f);
+            keyW = keyLocal.measureText(key);
+        }
+
+        float spacerW = value.isEmpty() ? 0f : valueLocal.measureText(spacer);
+        float maxValueW = Math.max(0f, cellW - 16f - keyW - spacerW);
+        float minValueSize = valueLocal.getTextSize() * minValueSizeRatio;
+        while (!value.isEmpty()
+                && !allowValueWrap
+                && valueLocal.measureText(value) > maxValueW
+                && valueLocal.getTextSize() > minValueSize) {
+            valueLocal.setTextSize(valueLocal.getTextSize() * 0.96f);
+        }
+
+        while (!value.isEmpty()
+                && !allowValueWrap
+                && valueLocal.measureText(value) > maxValueW
+                && value.length() > 1) {
+            value = value.substring(0, value.length() - 1);
+        }
+
+        float valueW = valueLocal.measureText(value);
+        float totalW = keyW + spacerW + valueW;
+        float startX = leftAlign
+                ? (cellX + 8f)
+                : (cellX + Math.max(8f, (cellW - totalW) / 2f));
+        if (allowValueWrap && !value.isEmpty()) {
+            float lineGap = Math.max(2f, valueLocal.getTextSize() * 0.25f);
+            float keyBaseline = cellY + Math.max(keyLocal.getTextSize() + 5f, (cellH * 0.42f));
+            canvas.drawText(key, startX, keyBaseline, keyLocal);
+
+            float valueStartX = startX + keyW + spacerW;
+            float valueAvailFirstLine = Math.max(0f, cellX + cellW - 8f - valueStartX);
+            float valueAvailFullLine = Math.max(0f, cellW - 16f);
+            String firstLine = value;
+            String secondLine = "";
+
+            if (valueLocal.measureText(firstLine) > valueAvailFirstLine) {
+                int breakIdx = findWrapIndex(value, valueLocal, valueAvailFirstLine);
+                if (breakIdx > 0 && breakIdx < value.length()) {
+                    firstLine = value.substring(0, breakIdx).trim();
+                    secondLine = value.substring(breakIdx).trim();
+                } else {
+                    firstLine = "";
+                    secondLine = value.trim();
+                }
+            }
+
+            while (!firstLine.isEmpty()
+                    && valueLocal.measureText(firstLine) > valueAvailFirstLine
+                    && valueLocal.getTextSize() > minValueSize) {
+                valueLocal.setTextSize(valueLocal.getTextSize() * 0.97f);
+            }
+
+            while (!secondLine.isEmpty()
+                    && valueLocal.measureText(secondLine) > valueAvailFullLine
+                    && valueLocal.getTextSize() > minValueSize) {
+                valueLocal.setTextSize(valueLocal.getTextSize() * 0.97f);
+            }
+
+            if (valueLocal.measureText(firstLine) > valueAvailFirstLine) {
+                firstLine = trimToWidth(firstLine, valueLocal, valueAvailFirstLine);
+            }
+            if (!secondLine.isEmpty() && valueLocal.measureText(secondLine) > valueAvailFullLine) {
+                secondLine = trimToWidth(secondLine, valueLocal, valueAvailFullLine);
+            }
+
+            if (!firstLine.isEmpty()) {
+                canvas.drawText(firstLine, valueStartX, keyBaseline, valueLocal);
+            }
+            if (!secondLine.isEmpty()) {
+                float secondBaseline = Math.min(cellY + cellH - 6f,
+                        keyBaseline + valueLocal.getTextSize() + lineGap);
+                canvas.drawText(secondLine, startX, secondBaseline, valueLocal);
+            }
+            return;
+        }
+
+        float drawTextSize = Math.max(keyLocal.getTextSize(), valueLocal.getTextSize());
+        float ty = cellY + (cellH / 2f) + (drawTextSize / 3f);
+
+        canvas.drawText(key, startX, ty, keyLocal);
+        if (!value.isEmpty()) {
+            canvas.drawText(value, startX + keyW + spacerW, ty, valueLocal);
+        }
+    }
+
+    private static void drawKeyValueOnNextLineInCell(
+            Canvas canvas,
+            String text,
+            int cellX,
+            int cellY,
+            int cellW,
+            int cellH,
+            Paint keyPaint,
+            Paint valuePaint) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+
+        Paint keyLocal = new Paint(keyPaint);
+        Paint valueLocal = new Paint(valuePaint);
+        keyLocal.setTextAlign(Paint.Align.LEFT);
+        valueLocal.setTextAlign(Paint.Align.LEFT);
+
+        String[] kv = splitKeyValue(text);
+        String key = kv[0];
+        String value = kv[1];
+        float startX = cellX + 8f;
+        float topPad = 6f;
+        float keyBaseline = cellY + topPad + keyLocal.getTextSize();
+        canvas.drawText(key, startX, keyBaseline, keyLocal);
+
+        if (value.isEmpty()) {
+            return;
+        }
+
+        float secondLineBaseline = keyBaseline + Math.max(6f, valueLocal.getTextSize() + 2f);
+        float availableW = Math.max(0f, cellW - 16f);
+        String firstLine = value;
+        String secondLine = "";
+
+        if (valueLocal.measureText(firstLine) > availableW) {
+            int breakIdx = findWrapIndex(value, valueLocal, availableW);
+            if (breakIdx > 0 && breakIdx < value.length()) {
+                firstLine = value.substring(0, breakIdx).trim();
+                secondLine = value.substring(breakIdx).trim();
+            }
+        }
+
+        if (valueLocal.measureText(firstLine) > availableW) {
+            firstLine = trimToWidth(firstLine, valueLocal, availableW);
+        }
+        if (!secondLine.isEmpty() && valueLocal.measureText(secondLine) > availableW) {
+            secondLine = trimToWidth(secondLine, valueLocal, availableW);
+        }
+
+        canvas.drawText(firstLine, startX, secondLineBaseline, valueLocal);
+        if (!secondLine.isEmpty()) {
+            float thirdLineBaseline = Math.min(cellY + cellH - 6f,
+                    secondLineBaseline + valueLocal.getTextSize() + 2f);
+            canvas.drawText(secondLine, startX, thirdLineBaseline, valueLocal);
+        }
+    }
+
+    private static int findWrapIndex(String text, Paint paint, float maxWidth) {
+        if (text == null || text.isEmpty()) {
+            return -1;
+        }
+
+        int lastSpace = -1;
+        for (int i = 1; i <= text.length(); i++) {
+            String candidate = text.substring(0, i);
+            if (paint.measureText(candidate) > maxWidth) {
+                return lastSpace > 0 ? lastSpace : Math.max(1, i - 1);
+            }
+            if (Character.isWhitespace(text.charAt(i - 1))) {
+                lastSpace = i - 1;
+            }
+        }
+        return -1;
+    }
+
+    private static String trimToWidth(String text, Paint paint, float maxWidth) {
+        String result = text == null ? "" : text;
+        while (!result.isEmpty() && paint.measureText(result) > maxWidth) {
+            result = result.substring(0, result.length() - 1).trim();
+        }
+        return result;
     }
 
     /**
@@ -1257,6 +1496,21 @@ public class PdfGeneratorPlugin {
             return new String[]{input.trim(), ""};
         }
         return new String[]{parts[0].trim(), parts[1].trim()};
+    }
+
+    private static String[] splitKeyValue(String input) {
+        if (input == null) {
+            return new String[]{"", ""};
+        }
+
+        int idx = input.indexOf(':');
+        if (idx < 0) {
+            return new String[]{input.trim(), ""};
+        }
+
+        String key = input.substring(0, idx + 1).trim();
+        String value = input.substring(idx + 1).trim();
+        return new String[]{key, value};
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────
@@ -1519,22 +1773,25 @@ public class PdfGeneratorPlugin {
         int x = margin;
         int y = startY + SIGNATURE_BLOCK_GAP;
         int sectionRowH = SIGNATURE_ROW_H;
+        int sectionH = sectionRowH * 3;
+        int roleRowH = sectionRowH;
+        int nameRowH = (sectionH - roleRowH) / 3;
+        int dateRowH = (sectionH - roleRowH) / 3;
+        int signRowH = sectionH - roleRowH - nameRowH - dateRowH;
         int sectionCount = 3;
-        int totalH = sectionCount * sectionRowH * 2;
+        int totalH = sectionCount * sectionH;
 
-        int dateStartX = x + 12;
+        int detailStartX = x + 12;
         int dateLabelW = 44;
-        int dateLineW = (int) (contentW * 0.34f);
+        int dateLineW = (int) (contentW * 0.56f);
 
-        int signLineW = (int) (contentW * 0.24f);
+        int signLineW = (int) (contentW * 0.56f);
         int signLabelW = 38;
-        int signLineX = x + contentW - 14 - signLineW;
-        int signLabelX = signLineX - signLabelW - 8;
 
         int nameTextX = x + 12;
-        int namePrefixW = 148;
+        int namePrefixW = 66;
         int nameLineStartX = nameTextX + namePrefixW;
-        int nameLineW = contentW - (nameLineStartX - x) - 14;
+        int nameLineW = (int) (contentW * 0.68f);
 
         Paint headerPaint = makePaint(Color.BLACK, bodyFontSize, Typeface.BOLD);
         Paint cellPaint = makePaint(Color.BLACK, bodyFontSize, Typeface.NORMAL);
@@ -1551,32 +1808,37 @@ public class PdfGeneratorPlugin {
 
         String[] labels = new String[]{"Inspected by", "Verified by", "Approved by"};
         for (String label : labels) {
-            int sectionTop = y;
-            int firstRowTop = sectionTop;
-            int firstRowBottom = firstRowTop + sectionRowH;
-            int secondRowTop = firstRowBottom;
-            int secondRowBottom = secondRowTop + sectionRowH;
+            int roleTop = y;
+            int roleBottom = roleTop + roleRowH;
+            int nameTop = roleBottom;
+            int nameBottom = nameTop + nameRowH;
+            int dateTop = nameBottom;
+            int dateBottom = dateTop + dateRowH;
+            int signTop = dateBottom;
+            int signBottom = signTop + signRowH;
 
-            // First row: "<Role> Name: ______________________"
-            String nameLabel = label + " Name:";
-            float firstTextY = firstRowTop + (sectionRowH / 2f) + (headerPaint.getTextSize() / 3f);
-            canvas.drawText(nameLabel, nameTextX, firstTextY, headerPaint);
-            float nameLineY = firstTextY + 3f;
+            float roleTextY = roleTop + (roleRowH / 2f) + (headerPaint.getTextSize() / 3f);
+            canvas.drawText(label + ":", nameTextX, roleTextY, headerPaint);
+
+            float nameTextY = nameTop + (nameRowH / 2f) + (headerPaint.getTextSize() / 3f);
+            canvas.drawText("Name:", nameTextX, nameTextY, cellPaint);
+            float nameLineY = nameTextY + 3f;
             canvas.drawLine(nameLineStartX, nameLineY, nameLineStartX + nameLineW, nameLineY, linePaint);
 
-            // Second row: Date left, Sign far right with shorter line.
-            float secondTextY = secondRowTop + (sectionRowH / 2f) + (cellPaint.getTextSize() / 3f);
+            float dateTextY = dateTop + (dateRowH / 2f) + (cellPaint.getTextSize() / 3f);
 
-            canvas.drawText("Date:", dateStartX, secondTextY, cellPaint);
-            float dateLineY = secondTextY + 3f;
-            int dateLineStartX = dateStartX + dateLabelW;
+            canvas.drawText("Date:", detailStartX, dateTextY, cellPaint);
+            float dateLineY = dateTextY + 3f;
+            int dateLineStartX = detailStartX + dateLabelW;
             canvas.drawLine(dateLineStartX, dateLineY, dateLineStartX + dateLineW, dateLineY, linePaint);
 
-            canvas.drawText("Sign:", signLabelX, secondTextY, cellPaint);
-            float signLineY = secondTextY + 3f;
-            canvas.drawLine(signLineX, signLineY, signLineX + signLineW, signLineY, linePaint);
+            float signTextY = signTop + (signRowH / 2f) + (cellPaint.getTextSize() / 3f);
+            canvas.drawText("Sign:", detailStartX, signTextY, cellPaint);
+            float signLineY = signTextY + 3f;
+            int signLineStartX = detailStartX + signLabelW;
+            canvas.drawLine(signLineStartX, signLineY, signLineStartX + signLineW, signLineY, linePaint);
 
-            y = secondRowBottom;
+            y = signBottom;
             if (!label.equals(labels[labels.length - 1])) {
                 // Divider between sections.
                 canvas.drawLine(x, y, x + contentW, y, borderPaint);
