@@ -1050,9 +1050,9 @@ public class PdfGeneratorPlugin {
             // vertical split inside mid column
             canvas.drawLine(logoEndX + leftDateCellW, y, logoEndX + leftDateCellW, projRowBot, hdrBorderPaint);
 
-            drawKeyValueInCell(canvas, dateLine,
+            drawKeyValueOnNextLineInCell(canvas, dateLine,
                     logoEndX, y, leftDateCellW, HDR_ROW_PROJ_NOS_H,
-                    row2BoldPaint, row2DateValuePaint, true, false, false, 0.90f);
+                    row2BoldPaint, row2DateValuePaint, true);
             drawKeyValueOnNextLineInCell(canvas, doneByLine,
                     logoEndX + leftDateCellW, y, rightDoneByCellW, HDR_ROW_PROJ_NOS_H,
                     row2BoldPaint, row2DoneByValuePaint, true);
