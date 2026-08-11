@@ -55,5 +55,6 @@ namespace PdfGenerationModule.Core
         public bool HasCheckbox; // if false, render as plain text row
         public bool IsHeaderRow;
         public bool IsNoteRow;
+        public List<string> ImagePaths;
     }
 }
